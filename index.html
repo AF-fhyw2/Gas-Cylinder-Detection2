@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SCBA 24組監測系統 - 指揮官加強版</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://unpkg.com/html5-qrcode"></script>
+<style>
+/* 完全保留原始樣式並補強圖表容器 */
+body { font-family: '微軟正黑體', sans-serif; background-color: #f5f5f5; padding: 15px; }
+.container { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; max-width: 100%; margin: auto; }
+.unit { background: white; padding: 15px; border-radius: 10px; transition: background-color 0.3s, border-color 0.3s; border: 2px solid transparent; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+.unit.danger-zone { background-color: #ffebee; border-color: #f44336; }
+.unit.evacuated { background-color: #e8f5e9; border-color: #4caf50; opacity: 0.9; }
+
+.member-info { display: flex; align-items: center; gap: 15px; background: #f9f9f9; padding: 10px; border-radius: 8px; margin-bottom: 10px; }
+.avatar-box { width: 70px; height: 70px; background-color: #ddd; border-radius: 5px; overflow: hidden; display: flex; justify-content: center; align-items: center; border: 1px solid #ccc; flex-shrink: 0; cursor: zoom-in; }
+.avatar-box img { width: 100%; height: 100%; object-fit: cover; }
+.id-input-area { flex: 1; }
+.scan-btn { cursor: pointer; font-size: 1.2em; margin-left: 15px; vertical-align: middle; display: inline-block; padding: 2px 5px; background: #eee; border-radius: 4px; }
+
+/* 燈箱樣式 */
+#avatar-lightbox { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 20000; display: none; justify-content: center; align-items: center; cursor: zoom-out; }
+#avatar-lightbox img { max-width: 90%; max-height: 90%; border: 5px solid white; border-radius: 10px; box-shadow: 0 0 30px rgba(255,255,255,0.2); }
+#avatar-lightbox-info { position: absolute; bottom: 5%; color: white; text-align: center; font-size: 1.5em; width: 100%; text-shadow: 2px 2px 5px black; }
+
+#qr-reader-wrapper { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 400px; z-index: 9999; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 0 20px rgba(0,0,0,0.5); display: none; }
+#qr-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9998; display: none; }
+.data-text-area { font-size: 0.85em; line-height: 1.4; color: #333; margin-top: 5px; }
+.data-item { border-bottom: 1px dotted #ccc; margin-bottom: 2px; }
+.data-label { font-weight: bold; color: #555; }
+
+.time-stamp-area { font-size: 0.85em; background: #fff9c4; padding: 5px; border-radius: 5px; margin-bottom: 10px; display: flex; justify-content: space-around; border: 1px solid #fbc02d; }
+.time-val { font-weight: bold; color: #d32f2f; }
+.time-val.exit { color: #2e7d32; }
+
+.settings, .input-section { margin-bottom: 10px; }
+.status-display { background: #f0f8ff; padding: 10px; border-radius: 8px; margin-bottom: 10px; }
+.progress-container { width: 100%; background-color: #e0e0e0; border-radius: 10px; margin: 10px 0; height: 18px; overflow: hidden; }
+.progress-bar { height: 100%; width: 100%; transition: width 0.5s ease-in-out, background-color 0.5s; background-color: #4caf50; }
+.records { display: flex; gap: 10px; }
+.history, .interval { flex: 1; background: #f9f9f9; padding: 10px; border-radius: 8px; font-size: 0.8em; }
+ul { list-style: none; padding: 0; }
+li { padding: 3px 0; border-bottom: 1px solid #ddd; }
+
+.chart-container { 
+    width: 100%; 
+    height: 220px; 
+    margin-bottom: 10px; 
+    background: #ffffff; 
+    border: 1px solid #ddd;
+    border-radius: 8px; 
+    padding: 10px; 
+    box-sizing: border-box; 
+}
+
+.good { color: green; font-weight: bold; }
+.warn { color: orange; font-weight: bold; }
+.bad { color: red; font-weight: bold; }
+button { padding: 4px 8px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; }
+
+.evac-btn { background: #4caf50; color: white; border: none; font-weight: bold; margin-left: 5px; }
+
+input:disabled { background-color: #e9ecef; cursor: not-allowed; border: 1px solid #ced4da; }
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+#global_controls { text-align: center; background: #333; color: white; padding: 12px; border-radius: 10px; margin: 10px auto 20px auto; max-width: 100%; display: flex; justify-content: center; gap: 15px; align-items: center; flex-wrap: wrap; }
+
+.alert { margin-top: 8px; padding: 8px; font-size: 16px; font-weight: bold; text-align: center; color: white; background-color: red; border-radius: 8px; animation: blink 1s infinite; line-height: 1.4; }
+@keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+.hidden { display: none; }
+
+h2 { margin-top: 0; text-align: center; display: flex; justify-content: center; align-items: center; gap: 10px; }
+.group-voice-control { font-size: 0.5em; font-weight: normal; background: #eee; padding: 2px 6px; border-radius: 4px; color: #333; display: flex; align-items: center; gap: 3px; }
+
+/* 側邊導航 */
+#side-drawer { position: fixed; top: 0; left: -250px; width: 250px; height: 100%; background-color: #333; color: white; transition: 0.3s; z-index: 10001; overflow-y: auto; box-shadow: 2px 0 10px rgba(0,0,0,0.5); padding-top: 20px; }
+#side-drawer.open { left: 0; }
+.drawer-header { padding: 15px; background: #111; border-bottom: 2px solid #ffcc00; margin-bottom: 10px; }
+#side-drawer a { padding: 12px 20px; text-decoration: none; font-size: 18px; color: #ddd; display: flex; justify-content: space-between; border-bottom: 1px solid #444; transition: 0.2s; }
+#side-drawer a:hover { background-color: #555; color: #ffcc00; }
+.side-tag { font-size: 12px; padding: 2px 5px; border-radius: 4px; }
+.tag-in { background: #ff4444; color: white; }
+.tag-out { background: #4caf50; color: white; }
+#menu-toggle-btn { position: fixed; top: 15px; left: 15px; z-index: 10002; background: #ff4444; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; font-size: 16px; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
+#drawer-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; display: none; }
+
+/* 警報側邊聯動樣式 */
+.drawer-item-alert { background-color: #ff4444 !important; color: white !important; animation: side-blink 1s infinite; }
+.drawer-item-alert span { color: white !important; }
+@keyframes side-blink { 0% { background-color: #ff4444; } 50% { background-color: #b71c1c; } 100% { background-color: #ff4444; } }
+</style>
+</head>
+<body>
+
+<div id="avatar-lightbox" onclick="closeLightbox()">
+    <img id="lightbox-img" src="">
+    <div id="avatar-lightbox-info"></div>
+</div>
+
+<button id="menu-toggle-btn" onclick="toggleDrawer()">☰ 戰情清單</button>
+<div id="drawer-overlay" onclick="toggleDrawer()"></div>
+<nav id="side-drawer">
+    <div class="drawer-header">
+        <div style="font-size: 18px; font-weight: bold; color: #ffcc00;">📊 戰情摘要</div>
+        <div style="font-size: 14px; margin-top: 5px;">內部人數：<span id="stat_inCount">0</span></div>
+        <div style="font-size: 14px; color: #ff5252;">警報總數：<span id="stat_alertCount">0</span></div>
+    </div>
+    <div id="drawer-links"></div>
+</nav>
+
+<h1 style="text-align:center;">🚒 SCBA 指揮監測系統 </h1>
+
+<div id="qr-overlay" onclick="stopScanner()"></div>
+<div id="qr-reader-wrapper">
+    <div id="qr-reader" style="width: 100%;"></div>
+    <button onclick="stopScanner()" style="width: 100%; margin-top: 10px; background: #f44336; color: white;">關閉掃描器</button>
+</div>
+
+<div id="global_controls">
+    <strong>指揮官控制台：</strong>
+    <button onclick="initAllSystems()" style="background: #ffcc00; font-weight: bold;">🔄 全體重設</button>
+    <button onclick="updateAllCharts()" style="background: #00bcd4; color:white;">📊 更新圖表</button>
+    <button onclick="exportAllToCSV()" style="background: #4caf50; color:white;">💾 匯出紀錄</button>
+    <button onclick="injectAllTestData()" style="background: #e91e63; color:white;">🧪 快速測試(A~D組)</button>
+    
+    <div style="background: #555; padding: 5px 10px; border-radius: 5px; display: flex; align-items: center; gap: 5px;">
+        <span>📂 載入人員名單 (.csv)：</span>
+        <input type="file" id="csvFileInput" accept=".csv" style="font-size: 12px; width: 150px;">
+    </div>
+</div>
+
+<div class="container" id="unit-container"></div>
+
+<script>
+let memberDatabase = {};
+const team = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X'];
+
+const container = document.getElementById('unit-container');
+team.forEach(id => {
+    const html = `
+        <div class="unit" id="unit${id}_box">
+            <h2>
+                ${id} 組員
+                <label class="group-voice-control">
+                    <input type="checkbox" id="${id}_voiceEnable" checked onchange="checkGlobalAlarm()"> 啟用聲音
+                </label>
+            </h2>
+
+            <div class="member-info">
+                <div class="avatar-box" onclick="openLightbox('${id}')">
+                    <img id="${id}_avatarImg" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="頭像">
+                </div>
+                <div class="id-input-area">
+                    編號：<input type="text" id="${id}_memberId" placeholder="輸入編號" style="width:80px" onchange="systems['${id}'].loadMember()">
+                    <button id="${id}_loadBtn" onclick="systems['${id}'].loadMember()">載入</button>
+                    <span class="scan-btn" id="${id}_scanBtn" onclick="startScanner('${id}')">📷</span>
+                    <div class="data-text-area">
+                        <div class="data-item"><span class="data-label">姓名:</span> <span id="${id}_name">--</span></div>
+                        <div class="data-item"><span class="data-label">性別:</span> <span id="${id}_gender">--</span></div>
+                        <div class="data-item"><span class="data-label">職稱:</span> <span id="${id}_rank">--</span></div>
+                        <div class="data-item"><span class="data-label">單位:</span> <span id="${id}_unit">--</span></div>
+                        <div class="data-item"><span class="data-label">血型:</span> <span id="${id}_blood">--</span></div>
+                        <div class="data-item"><span class="data-label">備註:</span> <span id="${id}_note">--</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="time-stamp-area">
+                <span>進場：<span id="${id}_timeIn" class="time-val">--:--:--</span></span>
+                <span>撤離：<span id="${id}_timeOut" class="time-val exit">--:--:--</span></span>
+            </div>
+
+            <div class="progress-container">
+                <div id="${id}_progressBar" class="progress-bar"></div>
+            </div>
+            <div class="settings">
+                容量(L) <input type="number" id="${id}_cylinderCapacity" value="6.8" style="width:35px">
+                初始(bar) <input type="number" id="${id}_initialPressure" placeholder="" style="width:55px">
+                <button id="${id}_initBtn" onclick="systems['${id}'].initializeSystem()">初始化</button>
+            </div>
+            <div class="input-section">
+                目前壓力(bar) <input type="number" id="${id}_currentPressure" style="width:60px">
+                <button id="${id}_readBtn" onclick="systems['${id}'].readPressure()">讀取</button>
+                <button onclick="systems['${id}'].showChart()">顯示曲線</button>
+                <button id="${id}_evacBtn" class="evac-btn" onclick="systems['${id}'].manualExit()">確認撤離</button>
+            </div>
+            <div class="status-display">
+                <p>總空氣量：<span id="${id}_totalAir">0</span> L / 剩餘：<span id="${id}_remainingAir">0</span> L (<span id="${id}_percentText">100</span>%)</p>
+                <p>剩餘時間：<span id="${id}_remainingTime" style="font-weight:bold; color:red;">0</span> 分鐘</p>
+                <p>累積平均換氣量：<span id="${id}_avgRate">0</span> L/min <span id="${id}_avgTag"></span></p>
+                <div id="${id}_alertBox" class="alert hidden"></div>
+            </div>
+            <div class="chart-container">
+                <canvas id="${id}_dataChart"></canvas>
+            </div>
+            <div class="records">
+                <div class="history">
+                    <h3>監測紀錄</h3>
+                    <ul id="${id}_historyList"></ul>
+                </div>
+                <div class="interval">
+                    <h3>區間紀錄</h3>
+                    <ul id="${id}_intervalList"></ul>
+                </div>
+            </div>
+        </div>
+    `;
+    container.insertAdjacentHTML('beforeend', html);
+});
+
+// --- 燈箱與全域功能 ---
+function openLightbox(prefix) {
+    const originalImg = document.getElementById(`${prefix}_avatarImg`);
+    if (originalImg.src.includes("data:image/gif;base64")) return;
+    const lightbox = document.getElementById('avatar-lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    const info = document.getElementById('avatar-lightbox-info');
+    lightboxImg.src = originalImg.src;
+    info.innerHTML = `組員 ${prefix} - ${document.getElementById(`${prefix}_name`).textContent}`;
+    lightbox.style.display = 'flex';
+}
+function closeLightbox() { document.getElementById('avatar-lightbox').style.display = 'none'; }
+function getClockTime() {
+    const now = new Date();
+    return now.getHours().toString().padStart(2, '0') + ":" + 
+           now.getMinutes().toString().padStart(2, '0') + ":" + 
+           now.getSeconds().toString().padStart(2, '0');
+}
+
+function addMinutesToTime(timeStr, minutes) {
+    if (!timeStr || timeStr === "--:--:--") return getClockTime();
+    const parts = timeStr.split(':');
+    const date = new Date();
+    date.setHours(parseInt(parts[0]), parseInt(parts[1]), parseInt(parts[2]));
+    date.setMinutes(date.getMinutes() + minutes);
+    return date.getHours().toString().padStart(2, '0') + ":" + 
+           date.getMinutes().toString().padStart(2, '0') + ":" + 
+           date.getSeconds().toString().padStart(2, '0');
+}
+
+function toggleDrawer() {
+    const d = document.getElementById('side-drawer');
+    const o = document.getElementById('drawer-overlay');
+    d.classList.toggle('open');
+    o.style.display = d.classList.contains('open') ? 'block' : 'none';
+}
+
+function generateDrawerLinks() {
+    const linksContainer = document.getElementById('drawer-links');
+    team.forEach(letter => {
+        const a = document.createElement('a');
+        a.href = `#unit${letter}_box`;
+        a.id = `side_link_${letter}`;
+        a.innerHTML = `<span>組員 ${letter}</span><span id="side_status_${letter}"></span>`;
+        a.onclick = function(e) {
+            e.preventDefault();
+            const target = document.getElementById(`unit${letter}_box`);
+            window.scrollTo({ top: target.offsetTop - 70, behavior: 'smooth' });
+            toggleDrawer();
+        };
+        linksContainer.appendChild(a);
+    });
+}
+generateDrawerLinks();
+
+function updateDashboardStats() {
+    let inCount = 0;
+    let alertCount = 0;
+    Object.values(systems).forEach(s => {
+        const sideStatus = document.getElementById(`side_status_${s.prefix}`);
+        const sideLink = document.getElementById(`side_link_${s.prefix}`);
+        
+        if (s.isEvacuated) { 
+            sideStatus.innerHTML = `<span class="side-tag tag-out">✅ 撤出</span>`; 
+        } else if (s.timeIn !== "--:--:--") { 
+            inCount++; 
+            sideStatus.innerHTML = `<span class="side-tag tag-in">🔥 在內</span>`; 
+        } else { 
+            sideStatus.innerHTML = ""; 
+        }
+
+        if (s.alarmLatched) {
+            alertCount++;
+            sideLink.classList.add('drawer-item-alert');
+        } else {
+            sideLink.classList.remove('drawer-item-alert');
+        }
+    });
+    document.getElementById('stat_inCount').textContent = inCount;
+    document.getElementById('stat_alertCount').textContent = alertCount;
+}
+
+// --- 核心系統邏輯 ---
+const SirenPlayer = {
+    audioCtx: null, oscillator: null, gainNode: null, interval: null,
+    start() {
+        if (this.oscillator) return;
+        this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        this.oscillator = this.audioCtx.createOscillator();
+        this.gainNode = this.audioCtx.createGain();
+        this.oscillator.type = 'square';
+        this.oscillator.connect(this.gainNode);
+        this.gainNode.connect(this.audioCtx.destination);
+        this.gainNode.gain.value = 0.1;
+        this.oscillator.start();
+        let high = true;
+        this.interval = setInterval(() => {
+            if (this.audioCtx) this.oscillator.frequency.setValueAtTime(high ? 960 : 770, this.audioCtx.currentTime);
+            high = !high;
+        }, 500);
+    },
+    stop() { if (this.oscillator) { this.oscillator.stop(); this.oscillator = null; clearInterval(this.interval); } }
+};
+
+class SCBAUnit {
+    constructor(prefix) {
+        this.prefix = prefix;
+        this.box = document.getElementById(`unit${prefix}_box`);
+        this.progressBar = document.getElementById(`${prefix}_progressBar`);
+        this.alertBox = document.getElementById(`${prefix}_alertBox`);
+        this.memberIdInput = document.getElementById(`${prefix}_memberId`);
+        this.avatarImg = document.getElementById(`${prefix}_avatarImg`);
+        this.cylinderCapacityInput = document.getElementById(`${prefix}_cylinderCapacity`);
+        this.initialPressureInput = document.getElementById(`${prefix}_initialPressure`);
+        this.currentPressureInput = document.getElementById(`${prefix}_currentPressure`);
+        this.history = []; this.intervals = []; this.chart = null;
+        this.alarmLatched = false; this.isEvacuated = false;
+        this.timeIn = "--:--:--"; this.timeOut = "--:--:--";
+        this.initP_Danger = false;
+    }
+
+    resetUI() {
+        this.memberIdInput.value = '';
+        this.memberIdInput.disabled = false;
+        this.avatarImg.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+        ['name', 'gender', 'rank', 'unit', 'blood', 'note'].forEach(k => {
+            document.getElementById(`${this.prefix}_${k}`).textContent = '--';
+        });
+        document.getElementById(`${this.prefix}_timeIn`).textContent = '--:--:--';
+        document.getElementById(`${this.prefix}_timeOut`).textContent = '--:--:--';
+        this.timeIn = "--:--:--";
+        this.timeOut = "--:--:--";
+        this.isEvacuated = false;
+        this.alarmLatched = false;
+        this.initP_Danger = false;
+        this.box.classList.remove('danger-zone', 'evacuated');
+        this.alertBox.classList.add('hidden');
+        this.alertBox.innerHTML = '';
+        this.history = [];
+        this.intervals = [];
+        if (this.chart) {
+            this.chart.destroy();
+            this.chart = null;
+        }
+        document.getElementById(`${this.prefix}_historyList`).innerHTML = '';
+        document.getElementById(`${this.prefix}_intervalList`).innerHTML = '';
+        this.updateDisplay(0, 0);
+        this.updateProgress(0);
+        document.getElementById(`${this.prefix}_avgRate`).textContent = '0';
+        document.getElementById(`${this.prefix}_avgTag`).textContent = '';
+    }
+
+    checkIdUniqueness(id) {
+        for (let key in systems) {
+            if (key !== this.prefix && systems[key].memberIdInput.value.trim() === id) return false;
+        }
+        return true;
+    }
+
+    loadMember() {
+        const id = this.memberIdInput.value.trim();
+        if (!id) return;
+        
+        if (!this.checkIdUniqueness(id)) {
+            alert(`⚠️ 編號 ${id} 已被佔用`);
+            this.memberIdInput.value = ""; return;
+        }
+
+        // 修改後的測試觸發邏輯已移至 injectAllTestData
+        this.memberIdInput.disabled = true;
+        if (memberDatabase[id]) {
+            ['name', 'gender', 'rank', 'unit', 'blood', 'note'].forEach(k => {
+                document.getElementById(`${this.prefix}_${k}`).textContent = memberDatabase[id][k];
+            });
+        }
+        this.avatarImg.src = `${id}.jpg`;
+        this.avatarImg.onerror = () => this.avatarImg.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    }
+
+    // 更新測試人員 A
+    runTestModeA() {
+        this.resetUI();
+        this.memberIdInput.value = "TEST999"; this.memberIdInput.disabled = true;
+        document.getElementById(`${this.prefix}_name`).textContent = "測試員A (換氣異常模擬)";
+        this.initialPressureInput.value = 280; // 初始改為 280bar
+        this.initializeSystem();
+        
+        // 壓力數據序列
+        const pts = [250, 230, 203, 164, 100]; // 5m, 10m, 15m, 20m, 25m
+        pts.forEach((p, i) => {
+            setTimeout(() => { 
+                this.currentPressureInput.value = p; 
+                this.readPressure(); 
+                if(i === pts.length - 1) this.showChart(); 
+            }, (i+1) * 200);
+        });
+    }
+
+    // 測試人員 B 保持不動
+    runTestModeB() {
+        this.resetUI();
+        this.memberIdInput.value = "NORMAL888"; this.memberIdInput.disabled = true;
+        document.getElementById(`${this.prefix}_name`).textContent = "測試員B (正常組)";
+        const initialP = 300;
+        this.initialPressureInput.value = initialP;
+        this.initializeSystem();
+        let currentP = initialP;
+        const capacity = 6.8;
+        for (let i = 1; i <= 6; i++) {
+            const randomRate = Math.floor(Math.random() * (55 - 35 + 1)) + 35;
+            const dropBar = (randomRate * 5) / capacity;
+            currentP -= dropBar;
+            const pressureToInput = Math.round(currentP);
+            setTimeout(() => {
+                this.currentPressureInput.value = pressureToInput;
+                this.readPressure();
+                if (i === 6) this.showChart();
+            }, i * 200);
+        }
+    }
+
+    // 新增測試人員 C (初始壓力不足)
+    runTestModeC() {
+        this.resetUI();
+        this.memberIdInput.value = "LOW_P_SCAN"; this.memberIdInput.disabled = true;
+        document.getElementById(`${this.prefix}_name`).textContent = "測試員C (禁入警報)";
+        this.initialPressureInput.value = 256; // 初始 256bar
+        this.initializeSystem(); // 會直接響起警報
+    }
+
+    // 新增測試人員 D (長時模擬與殘氣警報)
+    runTestModeD() {
+        this.resetUI();
+        this.memberIdInput.value = "DANGER_RES"; this.memberIdInput.disabled = true;
+        document.getElementById(`${this.prefix}_name`).textContent = "測試員D (殘氣警報)";
+        this.initialPressureInput.value = 286; // 初始 286bar
+        this.initializeSystem();
+        
+        // 壓力數據序列
+        const pts = [251, 230, 203, 164, 120, 85, 49]; // 5m ~ 35m
+        pts.forEach((p, i) => {
+            setTimeout(() => {
+                this.currentPressureInput.value = p;
+                this.readPressure();
+                if(i === pts.length - 1) this.showChart();
+            }, (i+1) * 200);
+        });
+    }
+
+    judge(rate) {
+        if (rate <= 60) return { text: '🟢 正常', cls: 'good' };
+        if (rate <= 80) return { text: '🟡 偏高', cls: 'warn' };
+        return { text: '🔴 異常', cls: 'bad' };
+    }
+
+    initializeSystem(isGlobalReset = false) {
+        if (this.isEvacuated && !isGlobalReset) return;
+        const inputP = +this.initialPressureInput.value;
+        this.alarmLatched = false; this.initP_Danger = false;
+        let alertMsgs = [];
+        if (!isGlobalReset && inputP <= 270) {
+            this.alarmLatched = true; this.initP_Danger = true;
+            alertMsgs.push(`⚠️ 初始壓力不足: ${inputP} bar`);
+        }
+        if (!isGlobalReset) {
+            this.timeIn = getClockTime();
+            document.getElementById(`${this.prefix}_timeIn`).textContent = this.timeIn;
+        }
+        this.cylinderCapacity = +this.cylinderCapacityInput.value;
+        this.initialPressure = inputP;
+        const totalAir = this.cylinderCapacity * this.initialPressure;
+        this.history = [{ time: 0, pressure: this.initialPressure, air: totalAir }];
+        this.intervals = []; this.isEvacuated = false;
+        this.updateAlertUI(alertMsgs);
+        this.box.classList.remove('evacuated');
+        this.box.classList.toggle('danger-zone', this.alarmLatched);
+        this.updateProgress(inputP);
+        this.updateDisplay(totalAir, Math.round(totalAir/50));
+        updateDashboardStats(); checkGlobalAlarm();
+    }
+
+    readPressure() {
+        if (this.isEvacuated) return;
+        const p = +this.currentPressureInput.value;
+        if (!p || p <= 0) return;
+        const last = this.history[this.history.length-1];
+        if (p > last.pressure) { alert("壓力不能高於前次紀錄"); return; }
+        const air = p * this.cylinderCapacity;
+        const intervalRate = (last.air - air) / 5;
+        const j = this.judge(intervalRate);
+        this.intervals.push({ time: this.history.length * 5, rate: intervalRate, judge: j });
+        this.history.push({ time: this.history.length * 5, pressure: p, air: air });
+        this.alarmLatched = false;
+        let alertMsgs = [];
+        if (this.initP_Danger) { this.alarmLatched = true; alertMsgs.push(`⚠️ 初始壓力不足: ${this.initialPressure} bar`); }
+        if (j.cls === 'bad') { this.alarmLatched = true; alertMsgs.push(`🚨 換氣異常: ${intervalRate.toFixed(1)} L/min`); }
+        if (p <= 50) { this.alarmLatched = true; alertMsgs.push(`⚠️ 殘氣危險: ${p} bar`); }
+        this.updateAlertUI(alertMsgs);
+        this.box.classList.toggle('danger-zone', this.alarmLatched);
+        const avg = this.intervals.reduce((s, i) => s + i.rate, 0) / this.intervals.length;
+        document.getElementById(`${this.prefix}_avgRate`).textContent = avg.toFixed(1);
+        const avgJ = this.judge(avg);
+        const tag = document.getElementById(`${this.prefix}_avgTag`);
+        tag.textContent = avgJ.text; tag.className = avgJ.cls;
+        this.updateDisplay(air, avg > 0 ? Math.round(air/avg) : "--");
+        this.updateProgress(p); this.renderLists();
+        updateDashboardStats(); checkGlobalAlarm();
+        this.currentPressureInput.value = '';
+    }
+
+    updateAlertUI(msgs) {
+        if (msgs.length > 0) { this.alertBox.innerHTML = msgs.join('<br>'); this.alertBox.classList.remove('hidden'); }
+        else { this.alertBox.classList.add('hidden'); }
+    }
+
+    updateProgress(p) {
+        const percent = this.initialPressure > 0 ? Math.round((p / this.initialPressure) * 100) : 0;
+        this.progressBar.style.width = percent + '%';
+        document.getElementById(`${this.prefix}_percentText`).textContent = percent;
+        this.progressBar.style.backgroundColor = percent > 50 ? '#4caf50' : (percent > 25 ? '#ff9800' : '#f44336');
+    }
+
+    updateDisplay(air, time) {
+        const total = (this.initialPressure || 0) * (this.cylinderCapacity || 0);
+        document.getElementById(`${this.prefix}_totalAir`).textContent = total.toFixed(1);
+        document.getElementById(`${this.prefix}_remainingAir`).textContent = air.toFixed(1);
+        document.getElementById(`${this.prefix}_remainingTime`).textContent = time;
+    }
+
+    renderLists() {
+        document.getElementById(`${this.prefix}_historyList`).innerHTML = this.history.map(h => `<li>${h.time}分 | ${h.pressure}bar</li>`).reverse().join('');
+        document.getElementById(`${this.prefix}_intervalList`).innerHTML = this.intervals.map(i => `<li>${i.time}分 | ${i.rate.toFixed(1)} L/min <span class="${i.judge.cls}">${i.judge.text}</span></li>`).reverse().join('');
+    }
+
+    manualExit() {
+        if (confirm(`確定組員 ${this.prefix} 撤出？`)) {
+            this.isEvacuated = true;
+            if (this.history.length > 0) {
+                const lastHistoryPoint = this.history[this.history.length - 1];
+                this.timeOut = addMinutesToTime(this.timeIn, lastHistoryPoint.time);
+            } else {
+                this.timeOut = getClockTime();
+            }
+            document.getElementById(`${this.prefix}_timeOut`).textContent = this.timeOut;
+            this.box.classList.add('evacuated'); this.box.classList.remove('danger-zone');
+            this.alertBox.classList.add('hidden'); this.alarmLatched = false;
+            updateDashboardStats(); checkGlobalAlarm();
+        }
+    }
+    
+    showChart() {
+        const ctx = document.getElementById(`${this.prefix}_dataChart`).getContext('2d');
+        if (this.chart) this.chart.destroy();
+        this.chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: this.history.map(h => h.time + "m"),
+                datasets: [
+                    { label: '壓力 (bar)', data: this.history.map(h => h.pressure), borderColor: '#2196f3', backgroundColor: 'rgba(33, 150, 243, 0.2)', fill: true, yAxisID: 'y', tension: 0.4 },
+                    { label: '換氣 (L/min)', data: [0, ...this.intervals.map(i => i.rate)], borderColor: '#ff9800', backgroundColor: 'rgba(255, 152, 0, 0.1)', fill: true, yAxisID: 'y1', tension: 0.4, borderDash: [5, 5] }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { type: 'linear', position: 'left', min: 0, max: 350 },
+                    y1: { type: 'linear', position: 'right', min: 0, max: 150, grid: { drawOnChartArea: false } }
+                }
+            }
+        });
+    }
+}
+
+const systems = {};
+team.forEach(id => { systems[id] = new SCBAUnit(id); });
+
+function checkGlobalAlarm() {
+    if (Object.values(systems).some(s => s.alarmLatched && document.getElementById(`${s.prefix}_voiceEnable`).checked)) SirenPlayer.start();
+    else SirenPlayer.stop();
+}
+
+function initAllSystems() {
+    if (confirm("確定要全體重設？")) {
+        Object.keys(systems).forEach(k => systems[k].resetUI());
+        updateDashboardStats(); checkGlobalAlarm();
+    }
+}
+
+function updateAllCharts() { Object.values(systems).forEach(s => s.showChart()); }
+
+// 修改後的快速測試按鈕
+function injectAllTestData() {
+    systems['A'].runTestModeA();
+    setTimeout(() => { systems['B'].runTestModeB(); }, 400);
+    setTimeout(() => { systems['C'].runTestModeC(); }, 800);
+    setTimeout(() => { systems['D'].runTestModeD(); }, 1200);
+}
+
+function exportAllToCSV() {
+    let csvRows = ["組別,組員編號,組員姓名,性別,職稱,單位,血型,進場時間,撤離時間,監測點(分鐘),壓力值(bar),警報狀態,備註"];
+    Object.values(systems).forEach(s => {
+        if (s.timeIn !== "--:--:--") {
+            const memberId = s.memberIdInput.value;
+            const name = document.getElementById(`${s.prefix}_name`).textContent;
+            const gender = document.getElementById(`${s.prefix}_gender`).textContent;
+            const rank = document.getElementById(`${s.prefix}_rank`).textContent;
+            const unitName = document.getElementById(`${s.prefix}_unit`).textContent;
+            const blood = document.getElementById(`${s.prefix}_blood`).textContent;
+            const note = document.getElementById(`${s.prefix}_note`).textContent;
+            const tIn = s.timeIn;
+            const tOut = s.isEvacuated ? s.timeOut : "仍在內";
+
+            if (s.history.length > 0) {
+                s.history.forEach((h, index) => {
+                    let alarmStatus = "正常";
+                    if (h.pressure <= 50) alarmStatus = "!! 殘氣危險 !!";
+                    const interval = s.intervals.find(i => i.time === h.time);
+                    if (interval && interval.judge.cls === 'bad') alarmStatus = "!! 換氣異常 !!";
+                    if (index === 0 && s.initialPressure <= 270) alarmStatus = "!! 初始壓力不足 !!";
+                    csvRows.push(`${s.prefix},${memberId},${name},${gender},${rank},${unitName},${blood},${tIn},${tOut},${h.time},${h.pressure},${alarmStatus},${note}`);
+                });
+            }
+        }
+    });
+    const blob = new Blob(["\ufeff" + csvRows.join("\n")], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `SCBA_Monitor_Report.csv`;
+    link.click();
+}
+
+let html5QrCode = null;
+async function startScanner(prefix) {
+    if (document.getElementById(`${prefix}_memberId`).disabled) return;
+    document.getElementById('qr-overlay').style.display = 'block';
+    document.getElementById('qr-reader-wrapper').style.display = 'block';
+    try {
+        if (!html5QrCode) html5QrCode = new Html5Qrcode("qr-reader");
+        await html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (decodedText) => {
+            document.getElementById(`${prefix}_memberId`).value = decodedText;
+            systems[prefix].loadMember();
+            stopScanner();
+        }, () => {});
+    } catch (err) { stopScanner(); }
+}
+async function stopScanner() {
+    if (html5QrCode && html5QrCode.isScanning) { await html5QrCode.stop(); html5QrCode = null; }
+    document.getElementById('qr-overlay').style.display = 'none';
+    document.getElementById('qr-reader-wrapper').style.display = 'none';
+}
+
+document.getElementById('csvFileInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const lines = e.target.result.split(/\r?\n/);
+        for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(',');
+            if (cols[0]) memberDatabase[cols[0].trim()] = { name: cols[1], gender: cols[2], rank: cols[3], unit: cols[4], blood: cols[5], note: cols[6] };
+        }
+        alert("名單載入成功");
+    };
+    reader.readAsText(file);
+});
+
+team.forEach(key => {
+    document.getElementById(`${key}_currentPressure`).addEventListener("keypress", (e) => { if (e.key === "Enter") systems[key].readPressure(); });
+});
+</script>
+</body>
+</html>
